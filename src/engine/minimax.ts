@@ -2,15 +2,31 @@ import type { Chess, Move } from 'chess.js';
 import { evaluateBoard, PIECE_VALUES } from './evaluation';
 import type { BotDifficulty } from '../types';
 
+const MATE_SCORE = 100000;
+
+const evaluateTerminal = (game: Chess, depth: number): number => {
+  if (game.isCheckmate()) {
+    return game.turn() === 'w' ? MATE_SCORE + depth : -MATE_SCORE - depth;
+  }
+  if (game.isDraw()) {
+    return 0;
+  }
+  return -evaluateBoard(game);
+};
+
 const minimax = (
   game: Chess,
   depth: number,
   alpha: number,
   beta: number,
-  isMaximizingPlayer: boolean
+  isMaximizingPlayer: boolean,
+  endTime?: number
 ): number => {
-  if (depth === 0 || game.isGameOver()) {
+  if (endTime && Date.now() > endTime) {
     return -evaluateBoard(game);
+  }
+  if (depth === 0 || game.isGameOver()) {
+    return evaluateTerminal(game, depth);
   }
 
   const moves = game.moves();
@@ -19,8 +35,9 @@ const minimax = (
   if (isMaximizingPlayer) {
     let maxEval = -Infinity;
     for (const move of moves) {
+      if (endTime && Date.now() > endTime) break;
       game.move(move);
-      const evalVal = minimax(game, depth - 1, alpha, beta, false);
+      const evalVal = minimax(game, depth - 1, alpha, beta, false, endTime);
       game.undo();
       maxEval = Math.max(maxEval, evalVal);
       alpha = Math.max(alpha, evalVal);
@@ -30,8 +47,9 @@ const minimax = (
   } else {
     let minEval = Infinity;
     for (const move of moves) {
+      if (endTime && Date.now() > endTime) break;
       game.move(move);
-      const evalVal = minimax(game, depth - 1, alpha, beta, true);
+      const evalVal = minimax(game, depth - 1, alpha, beta, true, endTime);
       game.undo();
       minEval = Math.min(minEval, evalVal);
       beta = Math.min(beta, evalVal);
@@ -71,8 +89,34 @@ export const getBestBotMove = (game: Chess, difficulty: BotDifficulty): Move | n
   }
 
   // Level 2 (Medium): Minimax Depth 2
-  // Level 3 (Hard): Minimax Depth 3
-  const depth = difficulty === 2 ? 2 : 3;
+  // Level 3 (Hard): Iterative deepening with a time budget
+  if (difficulty === 3) {
+    const endTime = Date.now() + 350;
+    let bestMove: Move | null = null;
+    let currentDepth = 1;
+
+    while (currentDepth <= 4 && Date.now() < endTime) {
+      let bestValue = -Infinity;
+      moves.sort(() => Math.random() - 0.5);
+
+      for (const move of moves) {
+        if (Date.now() > endTime) break;
+        game.move(move);
+        const val = minimax(game, currentDepth - 1, -Infinity, Infinity, false, endTime);
+        game.undo();
+        if (val > bestValue) {
+          bestValue = val;
+          bestMove = move;
+        }
+      }
+
+      currentDepth++;
+    }
+
+    return bestMove || moves[Math.floor(Math.random() * moves.length)];
+  }
+
+  const depth = 2;
   let bestMove: Move | null = null;
   let bestValue = -Infinity;
 

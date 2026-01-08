@@ -4,6 +4,7 @@ import { ChevronLeft, RotateCcw, Bot, User } from '../icons/Icons';
 import { Piece } from '../pieces/Piece';
 import { PromotionModal } from '../modals/PromotionModal';
 import { GameOverModal } from '../modals/GameOverModal';
+import { ConfirmModal } from '../modals/ConfirmModal';
 import { WaitingModal } from '../modals/WaitingModal';
 import { playMoveSound } from '../../utils/sound';
 import { getBestBotMove } from '../../engine/minimax';
@@ -19,6 +20,7 @@ import type {
   OnlineConfig,
   BotDifficulty,
   GameResult,
+  DrawOffer,
   PromotionPending,
   MoveData,
   PieceColor,
@@ -35,6 +37,7 @@ interface GameProps {
 
 export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 1, onExit }) => {
   const [game, setGame] = useState(new Chess());
+  const gameRef = useRef(game);
   const [board, setBoard] = useState(game.board());
   const [turn, setTurn] = useState<PieceColor>('w');
   const [selectedSquare, setSelectedSquare] = useState<SquareName | null>(null);
@@ -44,11 +47,44 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
   const [promotionPending, setPromotionPending] = useState<PromotionPending | null>(null);
   const [result, setResult] = useState<GameResult | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'offer-draw' | 'accept-draw' | 'resign' | null>(
+    null
+  );
+  const [drawOffer, setDrawOffer] = useState<DrawOffer | null>(null);
   const [isOnlineWaiting, setIsOnlineWaiting] = useState(
     mode === 'online' && onlineConfig?.playerColor === 'w'
   );
 
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const resultTimeoutRef = useRef<number | null>(null);
+  const drawOfferTimeoutRef = useRef<number | null>(null);
+  const resultRef = useRef<GameResult | null>(null);
+
+  const clearResultTimeout = () => {
+    if (resultTimeoutRef.current) {
+      window.clearTimeout(resultTimeoutRef.current);
+      resultTimeoutRef.current = null;
+    }
+  };
+
+  const clearDrawOfferTimeout = () => {
+    if (drawOfferTimeoutRef.current) {
+      window.clearTimeout(drawOfferTimeoutRef.current);
+      drawOfferTimeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    resultRef.current = result;
+  }, [result]);
+
+  useEffect(() => {
+    return () => {
+      clearResultTimeout();
+      clearDrawOfferTimeout();
+      if (unsubscribeRef.current) unsubscribeRef.current();
+    };
+  }, []);
 
   const isPlayerTurn = () => {
     if (mode === 'bot' && turn === 'b') return false;
@@ -72,7 +108,32 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
     return null;
   };
 
-  const updateGameState = (newGame: Chess = game) => {
+  const syncResult = async (newGame: Chess, res: GameResult) => {
+    if (mode === 'online' && onlineConfig?.gameId && db) {
+      const gameRefDoc = doc(db, 'artifacts', APP_ID, 'public', 'data', 'games', onlineConfig.gameId);
+      await updateDoc(gameRefDoc, {
+        fen: newGame.fen(),
+        turn: newGame.turn(),
+        history: newGame.history(),
+        status: 'finished',
+        result: res,
+        drawOffer: null,
+        lastMove: lastMove ?? null,
+      });
+    }
+  };
+
+  const endGame = (res: GameResult, newGame: Chess = game, syncOnline = true) => {
+    clearResultTimeout();
+    setResult(res);
+    setShowResultModal(false);
+    resultTimeoutRef.current = window.setTimeout(() => setShowResultModal(true), 1000);
+    if (syncOnline) {
+      syncResult(newGame, res);
+    }
+  };
+
+  const updateGameState = (newGame: Chess = game, syncOnline = true) => {
     setBoard(newGame.board());
     setTurn(newGame.turn());
 
@@ -93,8 +154,7 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
         res = { draw: true, reason: 'Draw' };
       }
 
-      setResult(res);
-      setTimeout(() => setShowResultModal(true), 1000);
+      endGame(res, newGame, syncOnline);
     } else {
       if (newGame.inCheck()) {
         const kingPos = findKing(newGame, newGame.turn());
@@ -108,22 +168,45 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
   // Online game sync
   useEffect(() => {
     if (mode === 'online' && onlineConfig?.gameId && db) {
-      const gameRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'games', onlineConfig.gameId);
+      const gameDocRef = doc(
+        db,
+        'artifacts',
+        APP_ID,
+        'public',
+        'data',
+        'games',
+        onlineConfig.gameId
+      );
 
       unsubscribeRef.current = onSnapshot(
-        gameRef,
+        gameDocRef,
         (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (onlineConfig.playerColor === 'w' && data.black && data.status === 'active') {
               setIsOnlineWaiting(false);
             }
-            const remoteGame = new Chess(data.fen);
-            if (remoteGame.fen() !== game.fen()) {
+            if (data.status === 'finished' && data.result && !resultRef.current) {
+              endGame(data.result, gameRef.current, false);
+            }
+            const offer = (data.drawOffer || null) as DrawOffer | null;
+            setDrawOffer(offer);
+            if (
+              offer &&
+              offer.from !== onlineConfig.playerColor &&
+              !resultRef.current &&
+              !promotionPending
+            ) {
+              setConfirmAction('accept-draw');
+            }
+            const remoteFen = data.fen;
+            if (remoteFen && remoteFen !== gameRef.current.fen()) {
+              const remoteGame = new Chess(remoteFen);
+              gameRef.current = remoteGame;
               setGame(remoteGame);
               setLastMove(data.lastMove);
               playMoveSound();
-              updateGameState(remoteGame);
+              updateGameState(remoteGame, false);
             }
           }
         },
@@ -131,7 +214,10 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
       );
     }
     return () => {
-      if (unsubscribeRef.current) unsubscribeRef.current();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
     };
   }, [mode, onlineConfig?.gameId]);
 
@@ -231,15 +317,76 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
       return;
     }
     const newGame = new Chess();
+    gameRef.current = newGame;
     setGame(newGame);
     setBoard(newGame.board());
     setTurn('w');
+    clearResultTimeout();
     setResult(null);
     setShowResultModal(false);
     setLastMove(null);
     setCheckSquare(null);
     setSelectedSquare(null);
     setPossibleMoves([]);
+    setDrawOffer(null);
+    setConfirmAction(null);
+  };
+
+  const offerDraw = async () => {
+    if (mode !== 'online' || !onlineConfig?.playerColor || !db || !onlineConfig.gameId) {
+      drawGame();
+      return;
+    }
+    if (drawOffer?.from === onlineConfig.playerColor) return;
+    const gameDocRef = doc(
+      db,
+      'artifacts',
+      APP_ID,
+      'public',
+      'data',
+      'games',
+      onlineConfig.gameId
+    );
+    await updateDoc(gameDocRef, {
+      drawOffer: { from: onlineConfig.playerColor, createdAt: Date.now() },
+    });
+  };
+
+  const clearDrawOffer = async () => {
+    if (mode === 'online' && onlineConfig?.gameId && db) {
+      const gameDocRef = doc(
+        db,
+        'artifacts',
+        APP_ID,
+        'public',
+        'data',
+        'games',
+        onlineConfig.gameId
+      );
+      await updateDoc(gameDocRef, { drawOffer: null });
+    }
+    setDrawOffer(null);
+  };
+
+  const declineDraw = async () => {
+    await clearDrawOffer();
+  };
+
+  const acceptDraw = async () => {
+    endGame({ draw: true, reason: 'Draw by agreement' });
+    setDrawOffer(null);
+  };
+
+  const resignGame = () => {
+    const resigningColor =
+      mode === 'online' ? onlineConfig?.playerColor : mode === 'bot' ? 'w' : turn;
+    if (!resigningColor) return;
+    const winner = resigningColor === 'w' ? 'b' : 'w';
+    endGame({ winner, reason: 'Resignation' });
+  };
+
+  const drawGame = () => {
+    endGame({ draw: true, reason: 'Draw by agreement' });
   };
 
   const getBoardSquareColor = (row: number, col: number) =>
@@ -279,6 +426,35 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
         : { leader: 'b' as PieceColor, diff: bScore - wScore };
 
   const isFlipped = mode === 'online' && onlineConfig?.playerColor === 'b';
+  const moveHistory = game.history();
+  const moveRows = [];
+  for (let i = 0; i < moveHistory.length; i += 2) {
+    moveRows.push({
+      move: i / 2 + 1,
+      white: moveHistory[i],
+      black: moveHistory[i + 1],
+    });
+  }
+
+  const hasOutgoingDrawOffer =
+    mode === 'online' && drawOffer?.from === onlineConfig?.playerColor;
+  const hasIncomingDrawOffer =
+    mode === 'online' && drawOffer?.from && drawOffer?.from !== onlineConfig?.playerColor;
+
+  useEffect(() => {
+    clearDrawOfferTimeout();
+    if (mode !== 'online' || !drawOffer) return;
+    const ttlMs = 60000;
+    const expiresAt = drawOffer.createdAt + ttlMs;
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) {
+      clearDrawOffer();
+      return;
+    }
+    drawOfferTimeoutRef.current = window.setTimeout(() => {
+      clearDrawOffer();
+    }, remaining);
+  }, [mode, drawOffer]);
 
   if (isOnlineWaiting && onlineConfig) {
     return <WaitingModal gameId={onlineConfig.gameId} onCancel={onExit} />;
@@ -436,6 +612,63 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
         </div>
       </div>
 
+      <div className="px-4 py-3">
+        <div className="bg-slate-800 border border-slate-700 rounded-xl">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+            <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+              Move List
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() =>
+                  setConfirmAction(hasIncomingDrawOffer ? 'accept-draw' : 'offer-draw')
+                }
+                disabled={
+                  !!result ||
+                  !!promotionPending ||
+                  isOnlineWaiting ||
+                  (mode === 'online' && hasOutgoingDrawOffer)
+                }
+                className="px-2.5 py-1 text-xs font-bold text-slate-200 bg-slate-700 hover:bg-slate-600 rounded-lg disabled:opacity-40"
+              >
+                {hasOutgoingDrawOffer ? 'Draw Offered' : hasIncomingDrawOffer ? 'Respond to Draw' : 'Offer Draw'}
+              </button>
+              <button
+                onClick={() => setConfirmAction('resign')}
+                disabled={!!result || !!promotionPending || isOnlineWaiting}
+                className="px-2.5 py-1 text-xs font-bold text-red-200 bg-red-900/40 hover:bg-red-900/60 rounded-lg disabled:opacity-40"
+              >
+                Resign
+              </button>
+            </div>
+          </div>
+          {(hasOutgoingDrawOffer || hasIncomingDrawOffer) && (
+            <div className="px-3 py-2 text-xs font-semibold text-amber-300 bg-amber-500/10 border-b border-amber-500/30">
+              {hasOutgoingDrawOffer
+                ? 'Draw offer sent. Expires in 1 minute.'
+                : 'Opponent offered a draw. Respond within 1 minute.'}
+            </div>
+          )}
+          <div className="max-h-32 overflow-auto">
+            {moveRows.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-slate-400">No moves yet.</div>
+            ) : (
+              <table className="w-full text-xs text-slate-300">
+                <tbody>
+                  {moveRows.map((row) => (
+                    <tr key={row.move} className="border-t border-slate-700/60">
+                      <td className="w-8 px-2 py-1 text-slate-500 font-semibold">{row.move}.</td>
+                      <td className="px-2 py-1 font-medium text-slate-200">{row.white}</td>
+                      <td className="px-2 py-1 text-slate-400">{row.black || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between px-4 py-3 mt-auto">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
@@ -458,14 +691,56 @@ export const Game: React.FC<GameProps> = ({ mode, onlineConfig, botDifficulty = 
       </div>
 
       <div className="bg-slate-800 p-2 text-center text-xs text-slate-400 h-8 flex items-center justify-center border-t border-slate-700">
-        {game.history().length === 0
-          ? mode === 'online'
+        {result
+          ? result.winner
+            ? `${result.winner === 'w' ? 'White' : 'Black'} wins`
+            : result.reason || 'Draw'
+          : mode === 'online'
             ? 'Online Game'
-            : 'Game Start'
-          : game.history().slice(-4).join(' ')}
+            : 'Game in progress'}
       </div>
 
       {promotionPending && <PromotionModal color={turn} onPromote={handlePromotion} />}
+      {confirmAction === 'offer-draw' && (
+        <ConfirmModal
+          title="Offer Draw?"
+          message={mode === 'online' ? 'Send a draw offer to your opponent.' : 'End the game as a draw.'}
+          confirmLabel={mode === 'online' ? 'Send Offer' : 'Accept Draw'}
+          onConfirm={() => {
+            setConfirmAction(null);
+            offerDraw();
+          }}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {confirmAction === 'accept-draw' && (
+        <ConfirmModal
+          title="Accept Draw?"
+          message="Your opponent offered a draw."
+          confirmLabel="Accept Draw"
+          cancelLabel="Decline"
+          onConfirm={() => {
+            setConfirmAction(null);
+            acceptDraw();
+          }}
+          onCancel={() => {
+            setConfirmAction(null);
+            declineDraw();
+          }}
+        />
+      )}
+      {confirmAction === 'resign' && (
+        <ConfirmModal
+          title="Resign Game?"
+          message="This will end the game immediately."
+          confirmLabel="Resign"
+          onConfirm={() => {
+            setConfirmAction(null);
+            resignGame();
+          }}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
       {result && showResultModal && (
         <GameOverModal
           result={result}

@@ -50,6 +50,7 @@ export const OnlineMenu: React.FC<OnlineMenuProps> = ({ onBack, onStartGame }) =
         lastMove: null,
         status: 'waiting',
         createdAt: Date.now(),
+        drawOffer: null,
       };
 
       await setDoc(

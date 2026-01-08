@@ -21,6 +21,11 @@ export interface GameResult {
   reason?: string;
 }
 
+export interface DrawOffer {
+  from: PieceColor;
+  createdAt: number;
+}
+
 export interface PromotionPending {
   from: SquareName;
   to: SquareName;
@@ -35,6 +40,8 @@ export interface GameData {
   lastMove: MoveData | null;
   status: 'waiting' | 'active' | 'finished';
   createdAt: number;
+  result?: GameResult | null;
+  drawOffer?: DrawOffer | null;
 }
 
 export type GameMode = 'pvp' | 'bot' | 'online';
