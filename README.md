@@ -5,8 +5,6 @@ It pairs a clean UI with a simple AI and Firebase-backed matchmaking.
 
 ## Screenshots
 
-Add a screenshot at `public/screenshot.png` and it will show up here:
-
 ![Modern Chess screenshot](public/screenshot.png)
 
 ## Features
