@@ -1,73 +1,80 @@
-# React + TypeScript + Vite
+# Modern Chess
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Modern Chess is a sleek, mobile-first chess experience with local, bot, and online play.
+It pairs a clean UI with a simple AI and Firebase-backed matchmaking.
 
-Currently, two official plugins are available:
+## Screenshots
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Add a screenshot at `public/screenshot.png` and it will show up here:
 
-## React Compiler
+![Modern Chess screenshot](public/screenshot.png)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the ESLint configuration
+- Pass & play on a single device.
+- Play vs bot with adjustable difficulty (minimax).
+- Online games with shareable 6-character codes.
+- Draw offers, resign, promotions, and game-over modals.
+- Move list, captured pieces, and score advantage indicators.
+- Subtle sound feedback on moves.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Tech Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- React + TypeScript + Vite
+- Tailwind CSS
+- chess.js
+- Firebase Auth + Firestore (optional, for online play)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Getting Started
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Install dependencies and start the dev server:
+
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Build and preview:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+npm run build
+npm run preview
+```
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Lint:
+
+```bash
+npm run lint
+```
+
+## Online Play (Firebase)
+
+Online games use Firebase Auth (anonymous) and Firestore. Add a `.env.local` with:
+
+```bash
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_APP_ID=modern-chess
+```
+
+Notes:
+- Online play is automatically disabled if Firebase variables are missing.
+- The Firestore rules in `firestore.rules` are scoped to authenticated players, but should still be reviewed for production use.
+
+## Project Structure
+
+- `src/components/views`: Home, Rules, Online menu, and Game screens.
+- `src/engine`: Bot evaluation and minimax logic.
+- `src/config/firebase.ts`: Firebase initialization and helpers.
+- `src/utils/sound.ts`: Sound effects for moves.
+
+## Contributing
+
+1. Create a feature branch.
+2. Run `npm run lint` before opening a PR.
+3. Include a short description of changes and any relevant screenshots.
 ```
